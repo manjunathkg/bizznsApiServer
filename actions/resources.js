@@ -156,36 +156,6 @@ exports.getAllResourceInstances = {
 };
 
 
-//Get a resource by ID
-exports.getResourceByID = {
-  name: "getResourceByID",
-  description: "I will get a resource matching the given id",
-  inputs: {
-    required: ['rName','id'],
-    optional: ['fields'],
-  },
-  blockedConnectionTypes: [],
-  outputExample: {},
-  version: 1.0,
-  run: function(api, connection, next){
-    // your logic here
-    var rName = connection.params.rName; 
-    var rData = {id:connection.params.id  };
-    var fields = connection.params.fields || {};
-    rData = JSON.stringify(rData);  //conver to proper string
-    rData = JSON.parse(rData);  //make it a proper object
-    console.log("about to call find on initializers:find");
-    api.resources.find(rName, fields,rData, function(error, resources){
-      connection.error = error;      
-      connection.response= resources;
-      next(connection, true);
-    });
-    
-  }
-};
-
-
-
 
 //Create a new resource
 exports.createResource = {
@@ -216,10 +186,8 @@ exports.createResource = {
           if(error){
             connection.error = error;     
 
-            console.log("Invalid call. could not create an instance of ") + rName;            
-
-          }
-                
+            console.log("Invalid call. could not create an instance of ") + rName;
+          }                
           connection.response = response;            
         baton.pass(response);
         });       
@@ -264,7 +232,7 @@ exports.createResource = {
 
 
 
-//Get a resource by ID
+//delete a resource by ID
 exports.deleteResourceByID = {
   name: "deleteResourceByID",
   description: "I will delete a resource matching the given id",
@@ -290,31 +258,61 @@ exports.deleteResourceByID = {
 
 
 
-
-
 //Get a resource by ID
-exports.findResourcesMatching = {
-  name: "findResourcesMatching",
-  description: "I will find resource instances matching the given criteria",
+exports.getResourceByID = {
+  name: "getResourceByID",
+  description: "I will get a resource matching the given id",
   inputs: {
-    required: ['rName', 'criteria'],
-    optional: [],
+    required: ['rName','id'],
+    optional: ['fields'],
   },
   blockedConnectionTypes: [],
   outputExample: {},
   version: 1.0,
   run: function(api, connection, next){
     // your logic here
-    var rName = connection.params.rName;
-    var rMethod = 'find';
-    var rData = {id:connection.params.criteria};     
-    rData = JSON.parse(rData);
-    api.resources.find(rName,rData, function(error, resources){
+    var rName = connection.params.rName; 
+    var id = connection.params.id;
+    var rData = {id:connection.params.id  };
+    var fields = connection.params.fields || {};
+    rData = JSON.stringify(rData);  //conver to proper string
+    rData = JSON.parse(rData);  //make it a proper object
+    console.log("about to call find on initializers:find");
+    api.resources.get(rName, fields, id, function(error, resources){
       connection.error = error;      
-      connection.response.resources = resources;
+      connection.response= resources;
       next(connection, true);
     });
     
+  }
+};
+
+
+
+//Find resources matching a criteria
+exports.findResourcesMatching = {
+  name: "findResourcesMatching",
+  description: "I will find resource instances matching the given criteria",
+  inputs: {
+    required: ['rName', 'criteria'],
+    optional: ['fields'],
+  },
+  blockedConnectionTypes: [],
+  outputExample: {},
+  version: 1.0,
+    run: function(api, connection, next){
+      // your logic here
+      var rName = connection.params.rName; 
+      var rData = connection.params.criteria;
+      var fields = connection.params.fields || {};
+      rData = JSON.stringify(rData);  //conver to proper string
+      rData = JSON.parse(rData);  //make it a proper object
+      console.log("about to call find on initializers:find");
+      api.resources.find(rName, fields,rData, function(error, resources){
+        connection.error = error;      
+        connection.response= resources;
+        next(connection, true);
+      });    
   }
 };
 
@@ -325,7 +323,7 @@ exports.linkResourceTo = {
   name: "linkResourceTo",
   description: "I will link resource instances ",
   inputs: {
-    required: ['rName','id', 'linkName', 'linked_id'  ],
+    required: ['fromRName','fromId', 'linkName', 'toRName', 'toId'  ],
     optional: [],
   },
   blockedConnectionTypes: [],
@@ -333,13 +331,25 @@ exports.linkResourceTo = {
   version: 1.0,
   run: function(api, connection, next){
     // your logic here
-    var rName = connection.params.rName;
-    var rMethod = 'find';
-    var rData = {id:connection.params.id};  
-    api.resources.invokeResourceMethod(rName,rMethod,rData, function(error, resources){
-      
+    var fromResource = connection.params.fromRName;
+        
+    var linkName = connection.params.linkName;
+    var toRname = connection.params.toRName;
+    var toId = connection.params.toId; 
+    var rData = {};
+    rData["id"] = connection.params.fromId;
+    rData[linkName] = { 
+                        ResourceType : toRname,
+                        id : [toId]
+                      }
+    
+    api.log("rData == " + JSON.stringify(rData) );
+    rData = new Buffer(JSON.stringify(rData));
+    rData = JSON.parse(rData);
+
+    api.resources.linkResourceTo(fromResource,linkName,rData, function(error, resources){      
       connection.error = error;      
-      connection.response.resources = resources;
+      connection.response = resources;
       next(connection, true);
     });
     
@@ -370,9 +380,7 @@ exports.updateOrCreateResourceByID = {
     rData.name = rData.name || 'DefaultName';
     rData.url = '/' + rName + '/' + rData.id;
     rData.dateCreated = Date.create().toISOString();
-
-
-// your logic here 
+ 
 
     api.resources.updateOrCreate(rName,rData, function(error, resources){
       connection.error = error;      

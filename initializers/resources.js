@@ -5,11 +5,13 @@ var jWorkflow = require("jWorkflow");
 var workflow = jWorkflow.order();
 var sugar = require('sugar');
 
+
 //
 // Use the web admin resource
 //
 
 var getRedisKey = function(keyType,options,next){
+        var options = options || {};
         var keyPrefix =   options.prefix || 'bizzns::' ;
         var keyType  =     keyType || 'ResourceRecord';
         var resourceName =     options.resourceName;
@@ -42,9 +44,11 @@ var getRedisKey = function(keyType,options,next){
     
 
 exports.resources = function(api, next){
-
   // modify / append the api global variable api.
   // I will be run as part of actionHero's boot process
+  api.redis.client.on("error", function (err) {
+      console.log("error event - " + client.host + ":" + client.port + " - " + err);
+  });
 
   api.resources = {
  
@@ -118,6 +122,21 @@ exports.resources = function(api, next){
           next(e,null);
         }          
     },
+
+    //get resource given resource name and id
+    get: function(resourceName,fields,id,next){  
+       var error;  
+       var _r;  
+       try{     
+          _r = resource.resources[resourceName];
+          _r.get(id,function(err, data){ 
+              next(err,data);
+          });               
+         }catch(e){           
+          api.log("**>>>>>>> ERROR:: get :: initializers:resources.js ***" + e);
+          next(e,null);
+        }          
+    },
     
 
     create: function(resourceName,params,next){  
@@ -137,63 +156,95 @@ exports.resources = function(api, next){
     },
 
     find: function(resourceName,fieldList,queryParams,next){  
-       var error;  
-       var _r;  
-       var FiledArray;
-       if(Object.keys(fieldList).length > 0){
-          FiledArray = fieldList.split(',');
-       }       
-           
-       var findResoucesMatchinCriteria = function(previous,baton){
-          baton.take();
-            try{     
-                    _r = resource.resources[resourceName];                      
-                    resource.invoke(_r.find,queryParams,function(err, data){                          
-                        baton.pass(data);                        
-                    });               
-                   }catch(e){
-                      error = e;
-                      api.log("ERROR:: find :: initializers:resources.js" + e);
-                      baton.pass();
-              }  
-       };
+           var error;  
+           var _r;  
+           var FiledArray;
+           if(Object.keys(fieldList).length > 0){
+              FiledArray = fieldList.split(',');
+           }       
+               
+           var findResourcesMatchinCriteria = function(previous,baton){
+            api.log("inside findResourcesMatchinCriteria");
+              baton.take();
+                try{ 
+                        _r = resource.resources[resourceName];                      
+                        resource.invoke(_r.find,queryParams,function(err, data){                          
+                            baton.pass(data);                        
+                        });               
+                       }catch(e){
+                          error = e;
+                          api.log("ERROR:: find :: initializers:resources.js" + e);
+                          baton.pass();
+                  }  
+           };
 
 
-       var loadResourcesIntoRedis = function(previous, baton){
-          baton.take();
-            var passedDataRecordsAarray = previous;
-            passedDataRecordsAarray.each(function(record){ 
+          var loadResourcesIntoRedis = function(previous, baton){
+            baton.take(); 
+            api.log("inside loadResourcesIntoRedis");
+              var passedDataRecordsAarray = previous;
+              passedDataRecordsAarray.each(function(record){ 
+                //api.log("**************  INSIDE passedDataRecordsAarray record " + JSON.stringify(record));
+                //try to get resource record for redis.. if doesnt exist, load into redis
+                var keyOptions = {id:record.id};
+                var recordKey = getRedisKey('id',keyOptions);
+                api.log("==========>>> " + recordKey);
+                var rrKey;
+                recordKey = new Buffer(recordKey); 
+                rrKey = getRedisKey('ResourceRecord',{resourceName : resourceName, id: record.id});           
+                api.redis.client.get(recordKey,function(err,reply){
+                    if(err==null && reply == null){
+                      api.redis.client.set(recordKey, rrKey , function(err, reply){
+                          //api.log('recordKey::reply from redis == >>' + reply);
+                          //api.log(">>>>>>> Inserted rrKey = " + rrKey + " into  recordKey = " + recordKey);
+                      });                } 
+                });
+                api.redis.client.hlen(rrKey, function(err,replies){
+                      api.log("rrKey ===> " + rrKey);
+                      api.log('rrKey::err == >>' + err);
+                      api.log('rrKey::replies == >>' + JSON.stringify(replies) );
+                      if(err == null && replies == 0 ){ 
+                          var _r = resource.resources[resourceName]; 
+                          Object.keys(_r.schema.properties).forEach(function(property) { 
+                                var value =  JSON.stringify(record[property])  ;
+                                var val = new Buffer(value);  //makes value to string 
+                                rrKey = new Buffer(rrKey) ;           
+                                //store the record 
+                                api.redis.client.hset( rrKey, property, val ,function(err,response){  
+                                   //set expiry to one hr
+                                   api.redis.client.expire(rrKey,3600,function(err,res){});
+                                });                                        
+                          });   
+                      }
+                      else{ //record exists use it..
+                          baton.pass(previous) ;
+                      }
+                });            
+              });
+              baton.pass(previous);
+            } 
 
-            })
-            //try to get resource record for redis.. if doesnt exist load 
-
-          baton.pass(previous);
-
-       };
-
-       var filterForTheNeededFields = function(previous, baton){
-          baton.take();
+          var filterForTheNeededFields = function(previous, baton){        
+            api.log("inside filterForTheNeededFields");
+            baton.take();
 
 
-          baton.pass(previous);
+            baton.pass(previous);
+          }
 
-       }
+          var returnResponse = function(previous, baton){        
+            api.log("inside returnResponse");
+            next(null,previous);
+          }
 
-       var returnResponse = function(previous, baton){
-          next(null,previous);
-       }
-
-       //workflow logic
-      workflow
-      .andThen(findResoucesMatchinCriteria)
-      .andThen(loadResourcesIntoRedis)
-      .andThen(filterForTheNeededFields)
-      .andThen(returnResponse);
-
-      workflow.start();  
-    
-      api.log("AAAA   END OF  FIND $$$$$$$$$$$$$");
-
+           //workflow logic
+          workflow
+            .andThen(findResourcesMatchinCriteria)
+            .andThen(loadResourcesIntoRedis)
+            .andThen(filterForTheNeededFields)
+            .andThen(returnResponse);
+          //find workflow start
+          workflow.start(); 
     },
 
     destroy: function(resourceName,params,next){  
@@ -221,6 +272,69 @@ exports.resources = function(api, next){
          }catch(e){
           error = e;
           api.log("**>>>>>>> ERROR:: updateOrCreate :: initializers:resources.js ***" + e);
+        }          
+    },
+
+    linkResourceTo: function(resourceName,linkedField,params,next){ 
+       api.log("======== linkResource to params begin == " + JSON.stringify(params)  ); 
+       var error;  
+       var _r;  
+       try{     
+          _r = resource.resources[resourceName];
+          //see if link field has existing ids attached
+          var rid = params["id"];
+          api.log("rid being sent is " + rid + " resourceName == " + resourceName);
+          var linkedFieldValues;
+          _r.get(rid, function(err, resource){
+            //api.log("resource got back is == " + JSON.stringify(resource)  );
+            if(err){
+              api.log("Error getting rid = " + rid + " Err was " + err);
+              next(err,null);
+              return;
+            }
+
+            if(resource == null){  //no target object
+              _r.create({id:rid}, function(err, createdResource){
+                  resource = createdResource;
+              })
+            }
+            
+            var tmplinkedField = resource[linkedField];
+            api.log("===>> tmplinkedField resource " + JSON.stringify(tmplinkedField));
+            var resType = params[linkedField].ResourceType;
+
+             if(tmplinkedField['id'] == null || tmplinkedField['id'] == undefined){
+                api.log("===>> resType from param == " + resType);
+                tmplinkedField = tmplinkedField[resType]; //ex: Person Or Organization
+                tmplinkedField = tmplinkedField.id;
+
+                linkedFieldValues = tmplinkedField || []; 
+                 api.log("linkedFieldValues from db == " +  JSON.stringify(linkedFieldValues) ) ;
+                linkedFieldValues = linkedFieldValues.add(params[linkedField].id);
+                params[linkedField] = {};
+                params[linkedField][resType] = {id:linkedFieldValues,ResourceType:resType};
+             }else{
+                 tmplinkedField = tmplinkedField.id;
+
+                 linkedFieldValues = tmplinkedField || [];
+                 api.log("linkedFieldValues from db == " +  JSON.stringify(linkedFieldValues) ); 
+                 linkedFieldValues = linkedFieldValues.add(params[linkedField].id);
+                 params[linkedField] = {};
+                 params[linkedField] = {id:linkedFieldValues,ResourceType:resType};
+             }
+              
+
+             api.log("======== linkResource to params == " + JSON.stringify(params)  );
+             _r.updateOrCreate(params,function(err, data){ 
+              next(err,data);
+          });               
+
+          });
+          
+         }catch(e){
+          error = e;
+          api.log("**>>>>>>> ERROR:: linkResourceTo :: initializers:resources.js ***" + e);
+          next(e,null);
         }          
     },
   	
@@ -274,13 +388,14 @@ exports.resources = function(api, next){
             var _r = resource.resources[resourceName]; 
             Object.keys(_r.schema.properties).forEach(function(property) { 
                   var value =  JSON.stringify(createdResource[property])  ;
-                  var val = new Buffer(value);  //makes value to string             
+                  var val = new Buffer(value);  //makes value to string
+                  rrKey = new Buffer(rrKey) ;            
                   //store the record 
-                  api.redis.client.hset( '"' + rrKey + '"', property, val ,function(err,response){  
-                     
-                  }); 
-                  baton.pass(rrKey);            
-            });             
+                  api.redis.client.hset( rrKey, property, val ,function(err,response){  
+                     baton.pass(rrKey);
+                  });                               
+            }); 
+                        
         }
 
         //store record fields in a set. rrKey = resource record key
@@ -288,28 +403,28 @@ exports.resources = function(api, next){
           baton.take()
 
             var rrKey = previous; 
-            var rrKey;       
-            api.redis.client.hkeys('"'+rrKey+'"', function(err,replies){
-                rrKeys = replies;
-                console.log("rrKeys == " +  rrKeys.toString() );
+            var rrKey;   
+            //get key at which to store field list for a resource
+            var keyOptions ={};
+            keyOptions.resourceName = rName;
+            keyOptions.keyType = "ResourceFields";
+            var rrFieldSet = getRedisKey(keyOptions.keyType, keyOptions);
 
-                //get key at which to store field list for a resource
-                var keyOptions ={};
-                keyOptions.resourceName = rName;
-                keyOptions.keyType = "ResourceFields";
-                var rrFieldSet = getRedisKey(keyOptions.keyType, keyOptions);
-                console.log("rrFieldSet == " +  rrFieldSet );
-
-
-                //store fields of the resource in rrFieldSet
-                rrKeys.each(function(key){
-                  api.redis.client.sadd('"' + rrFieldSet + '"',  key, function (err,response){
-                      //api.log("REDIS SAYS:: after sadd" + response);
-                  } );
-
-                  baton.pass(rrKey);
+            //if resource keyset exists, no need to create again
+            if(!api.redis.client.exists(rrFieldSet)){
+                api.redis.client.hkeys(new Buffer(rrKey), function(err,replies){
+                    rrKeys = replies;
+                    //console.log("rrKeys == " +  rrKeys.toString() );
+                    
+                    //store fields of the resource in rrFieldSet
+                    rrKeys.each(function(key){
+                      api.redis.client.sadd(new Buffer(rrFieldSet) ,  key, function (err,response){
+                          //api.log("REDIS SAYS:: after sadd" + response);
+                      } );                  
+                    });
                 });
-            });
+            }
+            baton.pass(rrKey);
         }
 
 
@@ -317,7 +432,7 @@ exports.resources = function(api, next){
             baton.take();
               var rrKey = previous;
               //expire the keys after one hour -- release the memory
-              api.redis.client.expire(['"' + rrKey + '"' , "3600"], function(error,response){
+              api.redis.client.expire([new Buffer(rrKey)  , "3600"], function(error,response){
                //api.log("REDIS SAYS:: after expire --" + response);
               });
 
@@ -331,15 +446,7 @@ exports.resources = function(api, next){
             andThen(createResourceRecordFieldSet).
             andThen(setKeyExpires);
 
-        workflow.start();
-        
-        
-
-        
-        
-        
-
-        
+        workflow.start();        
     }
     
   };

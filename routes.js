@@ -45,7 +45,7 @@ exports.routes = {
   get :[     
     {  path : "/resource/:resourceName/method/:methodName",  action: "resourceMethod"  },   
     {  path : "/resource/:resourceName/property/:propertyName", action: "resourceProperty"  },
-    {  path : "/resource/:rName/:id/link/:linkName/:linked_id",  action: "linkResourceTo" }, 
+    {  path : "/resource/link/:fromRName/:fromId/:linkName/:toRName/:toId",  action: "linkResourceTo" }, 
     {  path : "/resource/:rName/destroy/:id",           action: "deleteResourceByID" },
     {  path : "/resource/:rName/update/:id",            action: "updateResourceByID" }, 
     {  path : "/resource/:rName/updateOrCreate/:id",    action: "updateOrCreateResourceByID" },
