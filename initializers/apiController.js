@@ -43,12 +43,10 @@ var getRedisKey = function(keyType,options,next){
  
     
 
-exports.resources = function(api, next){
+exports.apiController = function(api, next){
   // modify / append the api global variable api.
   // I will be run as part of actionHero's boot process
-  api.redis.client.on("error", function (err) {
-      console.log("error event - " + client.host + ":" + client.port + " - " + err);
-  });
+ 
 
   api.resources = {
  
@@ -108,7 +106,7 @@ exports.resources = function(api, next){
     },
 
 
-    all: function(resourceName,params,next){  
+    all: function(resourceName,fields,next){  
        var error;  
        var _r;  
        try{     
@@ -145,7 +143,7 @@ exports.resources = function(api, next){
        try{     
           _r = resource.resources[resourceName];
           api.log(">> Sending in param - " + JSON.stringify(params)  );
-          _r.create(params,function(err, data){ 
+          _r.create({id:params.id},function(err, data){ 
                next(err,data);
           });               
          }catch(e){
@@ -451,6 +449,6 @@ exports.resources = function(api, next){
     
   };
 
-
+  console.log("******************  In apiController initializer");
   next(); //goto next initializer
 }
